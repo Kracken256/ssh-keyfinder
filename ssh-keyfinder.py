@@ -260,77 +260,75 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
         return data
 
 
-def extract_keys(filepaths: List[str], ssh_agent) -> List[str]:
+def extract_keys(filepath: str, ssh_agent) -> List[str]:
     keys: List[str] = []
 
     # Check if filepaths are valid
-    for filepath in filepaths:
-        if not os.path.exists(filepath):
-            log.error(f"Error: File {filepath} does not exist.")
-            return None
-    for filepath in filepaths:
-        # Fine the magic marker
-        magic_marker = find_magic_marker(filepath)
-        if magic_marker is None:
-            log.warn("Error: Could not find magic marker.")
-            return None
-        log.info(f"Magic marker found at {magic_marker}")
+    if not os.path.exists(filepath):
+        log.error(f"Error: File {filepath} does not exist.")
+        return None
+    # Fine the magic marker
+    magic_marker = find_magic_marker(filepath)
+    if magic_marker is None:
+        log.warn("Error: Could not find magic marker.")
+        return None
+    log.info(f"Magic marker found at {magic_marker}")
 
-        # Find the first pointer
-        idtable_pointer = find_idtable(filepath, magic_marker)
-        if idtable_pointer is None:
-            log.warn("Error: Could not find idtable struct pointer.")
-            return None
+    # Find the first pointer
+    idtable_pointer = find_idtable(filepath, magic_marker)
+    if idtable_pointer is None:
+        log.warn("Error: Could not find idtable struct pointer.")
+        return None
 
-        # Validate the first pointer
-        num_keys = validate_idtable_ptr(filepath, ssh_agent, idtable_pointer)
-        if not num_keys:
-            log.warn("Error: First pointer is invalid.")
-            return None
-        log.info(
-            f"Found the idtable struct at {pointer_tostring(idtable_pointer)}")
-        log.success(f"Found {num_keys} ssh private keys.")
-        # Get second pointer
-        for i in range(1, num_keys+1):
-            key_type = 0
-            try:
-                second_pointer = find_identity(
-                    filepath, ssh_agent, idtable_pointer, i)
-                if second_pointer is None:
-                    log.warn(
-                        "Could not find identity struct pointer (The key could be encrypted.)")
-                    raise Exception("Could not find identity struct pointer.")
+    # Validate the first pointer
+    num_keys = validate_idtable_ptr(filepath, ssh_agent, idtable_pointer)
+    if not num_keys:
+        log.warn("Error: First pointer is invalid.")
+        return None
+    log.info(
+        f"Found the idtable struct at {pointer_tostring(idtable_pointer)}")
+    log.success(f"Found {num_keys} ssh private keys.")
+    # Get second pointer
+    for i in range(1, num_keys+1):
+        key_type = 0
+        try:
+            second_pointer = find_identity(
+                filepath, ssh_agent, idtable_pointer, i)
+            if second_pointer is None:
+                log.warn(
+                    "Could not find identity struct pointer (The key could be encrypted.)")
+                raise Exception("Could not find identity struct pointer.")
 
-                log.info(
-                    f"Found identity struct {i} at {pointer_tostring(second_pointer)}")
+            log.info(
+                f"Found identity struct {i} at {pointer_tostring(second_pointer)}")
 
-                # Get the key struct pointer
-                _, key_type = find_sshkey(
-                    filepath, ssh_agent, second_pointer)
-                if key_type < 0 or key_type > 3:
-                    log.warn("Error: Key type is invalid.")
-                    raise Exception("Key type is invalid.")
-                    # Display the sshkey type
-                if key_type == 0:
-                    log.info("RSA key found")
-                    # Dump the key data
-                    rsa_ssh = dump_rsa(filepath, ssh_agent, second_pointer)
-                    if not rsa_ssh:
-                        log.warn("Error: Could not dump RSA key.")
-                        raise Exception("Could not dump RSA key.")
-                    log.success("RSA key extracted")
-                    keys.append(rsa_ssh)
-                elif key_type == 3:
-                    log.info("ECDSA key found")
-                    ecdsa_ssh = dump_ecdsa(filepath, ssh_agent, second_pointer)
-                    if not ecdsa_ssh:
-                        log.warn("Error: Could not dump EXDSA key.")
-                        raise Exception("Could not dump ECDSA key.")
-                    log.success("ECDSA key extracted")
-                    keys.append(ecdsa_ssh)
-            except:
-                log.warn(f"Error: Could not extract key of type {key_type}.")
-                continue
+            # Get the key struct pointer
+            _, key_type = find_sshkey(
+                filepath, ssh_agent, second_pointer)
+            if key_type < 0 or key_type > 3:
+                log.warn("Error: Key type is invalid.")
+                raise Exception("Key type is invalid.")
+                # Display the sshkey type
+            if key_type == 0:
+                log.info("RSA key found")
+                # Dump the key data
+                rsa_ssh = dump_rsa(filepath, ssh_agent, second_pointer)
+                if not rsa_ssh:
+                    log.warn("Error: Could not dump RSA key.")
+                    raise Exception("Could not dump RSA key.")
+                log.success("RSA key extracted")
+                keys.append(rsa_ssh)
+            elif key_type == 3:
+                log.info("ECDSA key found")
+                ecdsa_ssh = dump_ecdsa(filepath, ssh_agent, second_pointer)
+                if not ecdsa_ssh:
+                    log.warn("Error: Could not dump EXDSA key.")
+                    raise Exception("Could not dump ECDSA key.")
+                log.success("ECDSA key extracted")
+                keys.append(ecdsa_ssh)
+        except:
+            log.warn(f"Error: Could not extract key of type {key_type}.")
+            continue
     return keys
 
 
@@ -338,9 +336,9 @@ def main():
     # Get filepaths (coredumps) from command line arguments
     if (len(sys.argv) < 3):
         print(
-            f"Usage: python3 {sys.argv[0]} ssh-agent <coredump1> <coredump2> ...")
+            f"Usage: python3 {sys.argv[0]} <ssh-agent> <coredump>")
         sys.exit(1)
-    filepaths = sys.argv[2:]
+    filepaths = sys.argv[2]
     keys = extract_keys(filepaths, sys.argv[1])
     if keys is None:
         print("Error extracting SSH keys from the memory dumps.")
