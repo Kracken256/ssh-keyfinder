@@ -18,6 +18,10 @@ ssh-keyfinder has been tested and confirmed to work on the following systems:
 - Ubuntu 20.04 with OpenSSH V_8_4_P1 Linux 09a77df5423d 5.14.0-1050-oem #57-Ubuntu SMP Fri Aug 19 08:01:16 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
 - Zorin OS 16.2 with OpenSSH_8.2p1 Linux sanctom 5.14.0-1050-oem #57-Ubuntu SMP Fri Aug 19 08:01:16 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
 
+Did not work these versions:
+- OpenSSH_8.9p1
+
+This is likey because of a memory layout change (I havent looked into it). I will add support in the future unless there is a reason it is actually 'impossible'.
 
 ## Docker setup
 I including a docker image file for reliable usage. 
@@ -61,3 +65,17 @@ Replace `<coredump>` with the actual path to the core dump file.
 ## Contribution
 
 ssh-keyfinder is an open-source project, and contributions are welcome. If you encounter any bugs or issues, please report them on the project's [GitHub Issues](https://github.com/Kracken256/ssh-keyfinder/issues) page. If you would like to contribute code or documentation, please submit a pull request on the project's [GitHub repository](https://github.com/Kracken256/ssh-keyfinder).
+
+## Disclaimer of everything
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE, ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, PRIVACY, COMPLIENCE, REPUTATION, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY,  OR TORT (INCLUDING NEGLIGENCE OR 
+OTHERWISE) ARISING IN ANY WAY OUT  OF THE USE OF THIS SOFTWARE, 
+EVEN IF ADVISED OF THE POSSIBILITY OF  SUCH DAMAGE.
