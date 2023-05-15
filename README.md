@@ -29,6 +29,10 @@ You can also pull the docker image from Docker Hub.
 ```sh
 docker pull wesleyjones256/ssh-keyfinder:3.0
 ```
+Bind on 0.0.0.0:5555:
+```sh
+docker run -d --rm -p 5555:3000 wesleyjones256/ssh-keyfinder:3.0
+```
 
 ## Usage
 
