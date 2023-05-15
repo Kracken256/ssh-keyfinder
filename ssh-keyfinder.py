@@ -85,14 +85,6 @@ def find_idtable(filepath: str, index: int) -> int:
                 return None
 
 
-# Meant for running gdb shell commands
-
-
-def run_system_command(command: str) -> str:
-    p = subprocess.run(command, shell=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return p.stdout.decode('utf-8')
-
 # This is flipped wierdly. It returns the data in the format of a string of hex bytes. But is works.
 
 
@@ -100,8 +92,12 @@ def pointer_tostring(pointer: int) -> str:
     return f"0x{binascii.hexlify(pointer.to_bytes(8, byteorder='big')).decode('utf-8')}"
 
 
-def gdb_run_command_parse(command: str) -> bytes:
-    result = run_system_command(command)
+def gdb_run_command_parse(binary_path: str, coredump: str, pointer: int) -> bytes:
+    p = subprocess.Popen(['gdb', binary_path, coredump, '-ex', 'echo StartOfExec\n', '-ex', f'x/24gx {pointer}', '-ex', 'quit', '-q'],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+    out, err = p.communicate()
+
+    result = out.decode('utf-8')
     result = result[result.find("StartOfExec")+len("StartOfExec"):].strip()
     lines = result.split("\n")
     new_result = b''
@@ -125,9 +121,8 @@ def check_virtual_pointer(pointer: int) -> bool:
 # Save our sanity by checking the first pointer
 
 
-def validate_idtable_ptr(coredump: str, binary_path, pointer: int) -> bool:
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
+def validate_idtable_ptr(coredump: str, binary_path: str, pointer: int) -> bool:
+    data = gdb_run_command_parse(binary_path, coredump, pointer)
     if len(data) < 32:
         return None
     if data[7] == 0:
@@ -145,21 +140,15 @@ def validate_idtable_ptr(coredump: str, binary_path, pointer: int) -> bool:
 
 
 def find_identity(coredump: str, binary_path, pointer: int, i: int) -> int:
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
-    if len(data) < 32:
-        return None
 
     # get the i'th identity pointer from list
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
+    data = gdb_run_command_parse(binary_path, coredump, pointer)
     pointer = int.from_bytes(
         data[16:24], byteorder='big', signed=False)
     other_pointer = 0
     iteration = 0
     while iteration < i:
-        data = gdb_run_command_parse(
-            f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/24gx {pointer}' -ex 'quit' -q")
+        data = gdb_run_command_parse(binary_path, coredump, pointer)
 
         pointer = int.from_bytes(
             data[8:16], byteorder='big', signed=False)
@@ -172,12 +161,11 @@ def find_identity(coredump: str, binary_path, pointer: int, i: int) -> int:
 
 
 def shred_file(filepath: str):
-    subprocess.run(f"shred -uzf {filepath}", shell=True)
+    subprocess.run(['shred', '-uzf', filepath])
 
 
 def find_sshkey(coredump: str, binary_path, pointer: int):
-    data = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/8gx {pointer}' -ex 'quit' -q")
+    data = gdb_run_command_parse(binary_path, coredump, pointer)
 
     if len(data) < 8:
         return None
@@ -186,8 +174,7 @@ def find_sshkey(coredump: str, binary_path, pointer: int):
 
 def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
     raw_sshkey = None
-    raw_sshkey = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
+    raw_sshkey = gdb_run_command_parse(binary_path, coredump, sshkey_ptr)
 
     shielded_private = int.from_bytes(
         raw_sshkey[0x90-8:0x90], byteorder='big', signed=False)
@@ -202,19 +189,14 @@ def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
         raw_sshkey[0x90+16:0x90+24], byteorder='big', signed=False)
 
     # Dump the shielded private key from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
-
-    # Dump the shielded prekey from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+    subprocess.run(['gdb', binary_path,
+                   coredump, '-ex', f'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}', '-ex', f'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}', '-ex', 'quit', '-q'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Unshield the private key
-
-    sp = subprocess.Popen(["gdb", "./ssh-keygen"], stdin=subprocess.PIPE,
+    sp = subprocess.Popen(["gdb", "./ssh-keygen", "-q"], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     sp.stdin.write(gdb_key_unshield_cmd.encode("utf-8"))
-    sp.communicate()
+    out, err = sp.communicate()
 
     # Secure the private key
     shred_file("/tmp/key-prekey-shield.raw")
@@ -227,8 +209,7 @@ def dump_ecdsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
 
 def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
     raw_sshkey = None
-    raw_sshkey = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
+    raw_sshkey = gdb_run_command_parse(binary_path, coredump, sshkey_ptr)
 
     shielded_private = int.from_bytes(
         raw_sshkey[0x90-8:0x90], byteorder='big', signed=False)
@@ -243,12 +224,9 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
         raw_sshkey[0x90+16:0x90+24], byteorder='big', signed=False)
 
     # Dump the shielded private key from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
-
     # Dump the shielded prekey from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+    subprocess.run(['gdb', binary_path,
+                   coredump, '-ex', f'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}', '-ex', f'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}', '-ex', 'quit', '-q'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Unshield the private key
 
@@ -266,8 +244,7 @@ def dump_rsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
 
 def dump_dsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
     raw_sshkey = None
-    raw_sshkey = gdb_run_command_parse(
-        f"gdb {binary_path} {coredump} -ex 'echo StartOfExec\n' -ex 'x/28gx {sshkey_ptr}' -ex 'quit' -q")
+    raw_sshkey = gdb_run_command_parse(binary_path, coredump, sshkey_ptr)
 
     shielded_private = int.from_bytes(
         raw_sshkey[0x90-8:0x90], byteorder='big', signed=False)
@@ -282,12 +259,9 @@ def dump_dsa(coredump: str, binary_path, sshkey_ptr: int) -> str:
         raw_sshkey[0x90+16:0x90+24], byteorder='big', signed=False)
 
     # Dump the shielded private key from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}' -ex 'quit' -q")
-
     # Dump the shielded prekey from core
-    run_system_command(
-        f"gdb {binary_path} {coredump} -ex 'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}' -ex 'quit' -q")
+    subprocess.run(['gdb', binary_path,
+                   coredump, '-ex', f'dump memory /tmp/key-priv-shield.raw {shielded_private} {shielded_private+shielded_private_size}', '-ex', f'dump memory /tmp/key-prekey-shield.raw {shielded_prekey} {shielded_prekey+shielded_prekey_size}', '-ex', 'quit', '-q'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Unshield the private key
 

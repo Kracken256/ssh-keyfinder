@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Keyfinder - @Kracken256</title>
+    <link type="text/css" rel="stylesheet" href="/css/tailwind.css">
+</head>
+
+<body>
+    <div class="bg-gradient-to-r from-violet-600 to-indigo-600 h-screen w-screen  absolute top-0 left-0 flex flex-col">
+        <div class="bg-transparent/50 h-screen w-screen absolute top-0 left-0 flex flex-col">
+            <!-- Navbar -->
+            <div class="my-4 ml-2 flex-col">
+                <div class="inline-block py-2 px-3 ">
+                    <a class="text-xl font-bold text-gray-300/80 hover:text-blue-600"
+                        href="https://github.com/Kracken256/ssh-keyfinder">
+                        SSH Keyfinder
+                    </a>
+                </div>
+                <button
+                    class="inline-block px-3 py-2 bg-gray-300/30 rounded-lg hover:bg-gray-300/40 active:bg-gray-300/30 transition duration-50 ease-out hover:ease-in mx-2">
+                    <a class="text-white font-bold" href="/">Extract Keys</a>
+                </button>
+            </div>
+            <!-- Functional -->
+            <div class="flex  items-center  h-full m-auto">
+                <div class="w-[600px] h-[400px] bg-gray-300/30 rounded-xl place-items-center grid py-8">
+                    <h1 class="text-xl py-4 text-center font-bold text-gray-300 select-none">
+                        Upload your core dump files for analysis
+                    </h1>
+
+                    <!-- File drop upload -->
+                    <form class="h-full " action="/process" method="post" enctype="multipart/form-data">
+                        <input type="file" class="block text-xl text-white
+                        file:mr-4 file:py-2 file:px-6
+                        file:py-3
+                        file:rounded-full file:border-0
+                        file:text-xl file:font-semibold
+                        file:bg-violet-60 file:text-violet-700
+                        hover:file:bg-violet-100
+                        ml-[120px]" name="file" />
+                        <input type="submit"
+                            class="inline-block my-12 px-3 py-2 bg-blue-900 rounded-lg hover:bg-blue-900/80 active:bg-blue-900/90 transition duration-50 ease-out hover:ease-in ml-[200px] text-white font-bold"
+                            value="Extract Keys" />
+
+                    </form>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+
+</html>

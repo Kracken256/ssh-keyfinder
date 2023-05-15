@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Keyfinder - @Kracken256</title>
+    <link type="text/css" rel="stylesheet" href="/css/tailwind.css">
+</head>
+
+<body>
+    <div class="bg-gradient-to-r from-violet-600 to-indigo-600 h-screen w-screen  absolute top-0 left-0 flex flex-col ">
+        <div class="bg-transparent/50 h-screen w-screen absolute top-0 left-0 flex flex-col overflow-y-scroll">
+            <!-- Navbar -->
+            <div class="my-4 ml-2 flex-col">
+                <div class="inline-block py-2 px-3 ">
+                    <a class="text-xl font-bold text-gray-300/80 hover:text-blue-600"
+                        href="https://github.com/Kracken256/ssh-keyfinder">
+                        SSH Keyfinder
+                    </a>
+                </div>
+                <button
+                    class="inline-block px-3 py-2 bg-gray-300/30 rounded-lg hover:bg-gray-300/40 active:bg-gray-300/30 transition duration-50 ease-out hover:ease-in mx-2">
+                    <a class="text-white font-bold" href="/">Extract Keys</a>
+                </button>
+            </div>
+            <!-- Functional -->
+            {% if openssh_privatekeys %}
+            <div class="flex w-full items-center h-full m-auto p-14">
+
+                <div class="w-full max-w-[900px]  bg-gray-300/30 rounded-xl place-items-center grid py-8 m-auto px-6">
+                    <h2 class="text-2xl mb-4">Click key to copy</h2>
+                    {% for openssh_privatekey in openssh_privatekeys %}
+                    <div
+                        class="pb-3  px-5 whitespace-pre-line font-mono rounded-xl bg-gray-300/30 w-full text-sm my-2 js-copy-to-clip active:text-green-400">
+                        {{ openssh_privatekey }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+    <script>
+        var copyTarget = document.getElementsByClassName('js-copy-to-clip');
+        if (copyTarget.length > 0) {
+            for (let i = 0; i < copyTarget.length; i++) {
+
+                copyTarget[i].addEventListener('click', function () {
+                    navigator.clipboard.writeText(copyTarget[i].innerHTML.trim() + '\n');
+                });
+            }
+        }
+    </script>
+</body>
+
+</html>
