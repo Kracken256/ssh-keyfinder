@@ -2,6 +2,8 @@
 
 ssh-keyfinder is a tool that automates the extraction of SSH private keys from ssh-agent. It can extract all keys at once and format them in OpenSSH format. Additionally, it supports ALL SSH private key formats including RSA, ECDSA, and DSA.
 
+## If you find this code useful, please leave a star star.  ⭐
+
 ## Features
 - Simple WebUI frontend interface
 - Extracts SSH private keys from ssh-agent core dump
@@ -47,6 +49,8 @@ This will extract all private keys from ssh-agent and format them in OpenSSH for
 
 Replace `<coredump>` with the path to the core dump file.
 
+
+#### If you find this code useful, please leave a star star.  ⭐
 
 ## Contribution
 
